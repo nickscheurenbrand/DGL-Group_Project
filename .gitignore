@@ -1,5 +1,6 @@
 # Own
 generated_data/
+tests/
 
 
 # Environment
@@ -15,3 +16,6 @@ __pycache__/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# VSCode
+.vscode/
