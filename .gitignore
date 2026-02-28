@@ -1,6 +1,8 @@
 # Own
 generated_data/
 tests/
+evaluation_results/
+models/
 
 
 # Environment
