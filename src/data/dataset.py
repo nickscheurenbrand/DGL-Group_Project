@@ -21,9 +21,9 @@ def matrix_to_pyg_data(matrix: np.ndarray) -> Data:
 
 
 class BrainGraphDataset(Dataset):
-    def __init__(self, lr_csv_path: str, hr_csv_path: str) -> None:
-        self.lr_df = pd.read_csv(lr_csv_path)
-        self.hr_df = pd.read_csv(hr_csv_path)
+    def __init__(self, lr_file: str, hr_file: str) -> None:
+        self.lr_df = pd.read_csv(lr_file)
+        self.hr_df = pd.read_csv(hr_file)
         
         assert len(self.lr_df) == len(self.hr_df), "LR and HR datasets must match."
         self.n_samples: int = len(self.lr_df)
