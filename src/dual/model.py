@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.nn import DenseSAGEConv
 
 
 class BiSR(nn.Module):
@@ -101,13 +102,22 @@ class DEFEND(nn.Module):
 
 class BrainGraphSuperResolutionModel(nn.Module):
     """
-    The complete pipeline combining Bi-SR and DEFEND.
+    The complete pipeline combining GraphGCN, Bi-SR, and DEFEND.
     """
 
-    def __init__(self, in_nodes=160, out_nodes=268, hidden_dim=64):
+    def __init__(self, in_nodes=160, out_nodes=268, hidden_dim=64, k_threshold=0.6):
         super(BrainGraphSuperResolutionModel, self).__init__()
 
-        # Topological feature extraction (Identity assumption X = A handled by feature_dim=in_nodes)
+        # Threshold for binarizing the adjacency matrix to delineate strict neighborhoods
+        self.k_threshold = k_threshold
+
+        # 2-Layer Dense GraphSAGE Architecture
+        # Provides 2-hop neighborhood aggregation while concatenating central node features,
+        # which is robust for structure-based embedding.
+        self.sage1 = DenseSAGEConv(in_channels=in_nodes, out_channels=128)
+        self.sage2 = DenseSAGEConv(in_channels=128, out_channels=in_nodes)
+
+        # Topological feature extraction
         self.bi_sr = BiSR(
             in_nodes=in_nodes,
             out_nodes=out_nodes,
@@ -123,8 +133,23 @@ class BrainGraphSuperResolutionModel(nn.Module):
         Returns:
             adj_hr: Batch of super-resolved high-resolution adjacency matrices (Batch, 268, 268).
         """
-        # 1. Map topology to target HR dimensions via Bipartite formulation
-        hr_node_embeddings = self.bi_sr(adj_lr)
+        # 1. Prepare GNN Inputs
+        # The node features are the original un-thresholded continuous connectivity profiles.
+        node_features = adj_lr
+
+        # The topological routing graph is strictly binary based on the weight threshold k.
+        binary_adj = (adj_lr > self.k_threshold).float()
+
+        # 2. GraphSAGE Forward Pass
+        x_hidden = F.relu(self.sage1(node_features, binary_adj))
+        x_gnn = F.relu(self.sage2(x_hidden, binary_adj))
+
+        # We add a residual connection combining the transformed structural embedding
+        # with the original continuous row profile
+        x_lr_enriched = x_gnn + adj_lr
+
+        # 3. Map topology to target HR dimensions via Bipartite formulation
+        hr_node_embeddings = self.bi_sr(x_lr_enriched)
 
         # 2. Predict precise edge weights via Dual Graph feature learning
         hr_adjacency_matrix = self.defend(hr_node_embeddings)

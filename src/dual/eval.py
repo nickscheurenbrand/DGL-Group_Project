@@ -36,6 +36,12 @@ def get_args():
         default="evaluation_results",
         help="Directory to save evaluation plots",
     )
+    parser.add_argument(
+        "--k_threshold",
+        type=float,
+        default=0.6,
+        help="Threshold for binarizing adjacency matrix",
+    )
     return parser.parse_args()
 
 
@@ -57,7 +63,7 @@ def evaluate():
     # 2. Instantiate and Load Model
     print(f"Loading model from {args.model_path}...")
     model = BrainGraphSuperResolutionModel(
-        in_nodes=160, out_nodes=268, hidden_dim=64
+        in_nodes=160, out_nodes=268, hidden_dim=64, k_threshold=args.k_threshold
     ).to(device)
 
     if not os.path.exists(args.model_path):

@@ -15,37 +15,33 @@ def get_args():
         "--data_dir",
         type=str,
         default="generated_data",
-        help="Directory containing the training data"
+        help="Directory containing the training data",
     )
     parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=32,
-        help="Training batch size"
+        "--batch_size", type=int, default=32, help="Training batch size"
     )
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=10,
-        help="Number of training epochs"
+        "--epochs", type=int, default=10, help="Number of training epochs"
     )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1e-3,
-        help="Learning rate"
-    )
-    parser.add_argument(
-        "--weight_decay",
-        type=float,
-        default=1e-4,
-        help="Weight decay"
-    )
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument(
         "--save_dir",
         type=str,
         default="models",
-        help="Directory to save the checkpoints"
+        help="Directory to save the checkpoints",
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="best_model.pth",
+        help="Name of the model file",
+    )
+    parser.add_argument(
+        "--k_threshold",
+        type=float,
+        default=0.6,
+        help="Threshold for binarizing adjacency matrix",
     )
     return parser.parse_args()
 
@@ -53,7 +49,7 @@ def get_args():
 def train():
     args = get_args()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -71,27 +67,20 @@ def train():
     print("Initializing model...")
     # BiSR layer maps from 160 input nodes to 268 output nodes
     model = BrainGraphSuperResolutionModel(
-        in_nodes=160,
-        out_nodes=268,
-        hidden_dim=64
+        in_nodes=160, out_nodes=268, hidden_dim=64, k_threshold=args.k_threshold
     ).to(device)
 
     # 3. Define Loss Function and Optimizer
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=0.5,
-        patience=5
+        optimizer, mode="min", factor=0.5, patience=5
     )
 
     # 4. Training Loop
-    best_val_loss = float('inf')
+    best_val_loss = float("inf")
 
     for epoch in range(1, args.epochs + 1):
         # Training Phase
@@ -104,7 +93,7 @@ def train():
             lr_data, hr_data = batch
 
             # The nodes features 'x' store the dense matrix, flattened across the batch.
-            # Shape of lr_data.x is (Batch * 160, 160). 
+            # Shape of lr_data.x is (Batch * 160, 160).
             # We reshape it back to (Batch, 160, 160).
             num_graphs = lr_data.num_graphs
             lr_adj = lr_data.x.view(num_graphs, 160, 160).to(device)
@@ -119,7 +108,7 @@ def train():
             optimizer.step()
 
             train_loss += loss.item() * num_graphs
-            pbar.set_postfix({'loss': f"{loss.item():.4f}"})
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
         train_loss /= len(train_loader.dataset)
 
@@ -130,7 +119,7 @@ def train():
         with torch.no_grad():
             for batch in val_loader:
                 lr_data, hr_data = batch
-                
+
                 num_graphs = lr_data.num_graphs
                 lr_adj = lr_data.x.view(num_graphs, 160, 160).to(device)
                 hr_adj_target = hr_data.x.view(num_graphs, 268, 268).to(device)
@@ -141,16 +130,18 @@ def train():
                 val_loss += loss.item() * num_graphs
 
         val_loss /= len(val_loader.dataset)
-        
+
         # Step the scheduler based on validation loss
         scheduler.step(val_loss)
 
-        print(f"Epoch {epoch} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
+        print(
+            f"Epoch {epoch} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}"
+        )
 
         # Save Best Model Checkpoint
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            checkpoint_path = os.path.join(args.save_dir, 'best_model.pth')
+            checkpoint_path = os.path.join(args.save_dir, args.model_name)
             torch.save(model.state_dict(), checkpoint_path)
             print(f"--> Saved new best model to {checkpoint_path}")
 
