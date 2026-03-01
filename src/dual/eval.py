@@ -18,7 +18,7 @@ def get_args():
     parser.add_argument(
         "--data_dir",
         type=str,
-        default="generated_data",
+        default="../cw2/dgl-2026-brain-graph-super-resolution-challenge/",
         help="Directory containing the training/validation data",
     )
     parser.add_argument(
