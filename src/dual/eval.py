@@ -24,7 +24,7 @@ def get_args():
     parser.add_argument(
         "--model_path",
         type=str,
-        default="models/best_model.pth",
+        default="results/dual/best_model.pth",
         help="Path to the trained model checkpoint",
     )
     parser.add_argument(
@@ -33,7 +33,7 @@ def get_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="evaluation_results",
+        default="results/dual",
         help="Directory to save evaluation plots",
     )
     parser.add_argument(
