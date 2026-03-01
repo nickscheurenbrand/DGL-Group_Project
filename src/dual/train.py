@@ -17,13 +17,11 @@ def get_args():
         default="generated_data",
         help="Directory containing the training data",
     )
+    parser.add_argument("--batch_size", type=int, default=8, help="Training batch size")
     parser.add_argument(
-        "--batch_size", type=int, default=32, help="Training batch size"
+        "--epochs", type=int, default=70, help="Number of training epochs"
     )
-    parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of training epochs"
-    )
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=0.0005, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument(
         "--save_dir",
@@ -40,8 +38,17 @@ def get_args():
     parser.add_argument(
         "--k_threshold",
         type=float,
-        default=0.6,
+        default=0.8,
         help="Threshold for binarizing adjacency matrix",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=10,
+        help="Patience for the learning rate scheduler",
+    )
+    parser.add_argument(
+        "--gcn_layers", type=int, default=2, help="Number of GCN layers"
     )
     return parser.parse_args()
 
@@ -67,7 +74,11 @@ def train():
     print("Initializing model...")
     # BiSR layer maps from 160 input nodes to 268 output nodes
     model = BrainGraphSuperResolutionModel(
-        in_nodes=160, out_nodes=268, hidden_dim=64, k_threshold=args.k_threshold
+        in_nodes=160,
+        out_nodes=268,
+        hidden_dim=64,
+        gcn_layers=args.gcn_layers,
+        k_threshold=args.k_threshold,
     ).to(device)
 
     # 3. Define Loss Function and Optimizer
@@ -76,7 +87,7 @@ def train():
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+        optimizer, mode="min", factor=0.5, patience=args.patience
     )
 
     # 4. Training Loop

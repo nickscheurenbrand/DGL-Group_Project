@@ -105,17 +105,32 @@ class BrainGraphSuperResolutionModel(nn.Module):
     The complete pipeline combining GraphGCN, Bi-SR, and DEFEND.
     """
 
-    def __init__(self, in_nodes=160, out_nodes=268, hidden_dim=64, k_threshold=0.6):
+    def __init__(
+        self,
+        in_nodes=160,
+        out_nodes=268,
+        hidden_dim=64,
+        gcn_layers=2,
+        hidden_dim_gcn=128,
+        k_threshold=0.6,
+    ):
         super(BrainGraphSuperResolutionModel, self).__init__()
 
         # Threshold for binarizing the adjacency matrix to delineate strict neighborhoods
         self.k_threshold = k_threshold
 
-        # 2-Layer Dense GraphSAGE Architecture
-        # Provides 2-hop neighborhood aggregation while concatenating central node features,
-        # which is robust for structure-based embedding.
-        self.sage1 = DenseSAGEConv(in_channels=in_nodes, out_channels=128)
-        self.sage2 = DenseSAGEConv(in_channels=128, out_channels=in_nodes)
+        self.gcn_layers = nn.ModuleList(
+            DenseSAGEConv(in_channels=in_nodes, out_channels=hidden_dim_gcn)
+        )
+        for _ in range(gcn_layers - 1):
+            self.gcn_layers.append(
+                DenseSAGEConv(in_channels=hidden_dim_gcn, out_channels=hidden_dim_gcn)
+            )
+        self.gcn_layers.append(
+            DenseSAGEConv(in_channels=hidden_dim_gcn, out_channels=in_nodes)
+        )
+        if gcn_layers == 1:  # If only one layer, it should output the original features
+            self.gcn_layers = DenseSAGEConv(in_channels=in_nodes, out_channels=in_nodes)
 
         # Topological feature extraction
         self.bi_sr = BiSR(
@@ -141,12 +156,12 @@ class BrainGraphSuperResolutionModel(nn.Module):
         binary_adj = (adj_lr > self.k_threshold).float()
 
         # 2. GraphSAGE Forward Pass
-        x_hidden = F.relu(self.sage1(node_features, binary_adj))
-        x_gnn = F.relu(self.sage2(x_hidden, binary_adj))
+        for layer in self.gcn_layers:
+            node_features = F.relu(layer(node_features, binary_adj))
 
         # We add a residual connection combining the transformed structural embedding
         # with the original continuous row profile
-        x_lr_enriched = x_gnn + adj_lr
+        x_lr_enriched = node_features + adj_lr
 
         # 3. Map topology to target HR dimensions via Bipartite formulation
         hr_node_embeddings = self.bi_sr(x_lr_enriched)
