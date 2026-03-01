@@ -33,7 +33,7 @@ def get_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="results/dual",
+        default="evaluation_results",
         help="Directory to save evaluation plots",
     )
     parser.add_argument(
@@ -128,6 +128,15 @@ def evaluate():
     print(f"Mean Absolute Error (MAE):  {global_mae:.6f}")
     print(f"Pearson Correlation (r):    {pearson_corr:.6f}")
     print("=" * 40)
+
+    # Save metrics to a json file for record-keeping
+    metrics_path = os.path.join(args.output_dir, "evaluation_metrics.txt")
+    with open(metrics_path, "w") as f:
+        f.write("Evaluation Metrics\n")
+        f.write("=" * 20 + "\n")
+        f.write(f"Mean Squared Error (MSE):   {global_mse:.6f}\n")
+        f.write(f"Mean Absolute Error (MAE):  {global_mae:.6f}\n")
+        f.write(f"Pearson Correlation (r):    {pearson_corr:.6f}\n")
 
     # 3. Generate Visualizations
     print("\nGenerating evaluation plots...")

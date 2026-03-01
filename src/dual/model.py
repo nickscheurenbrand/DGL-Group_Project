@@ -50,10 +50,18 @@ class DEFEND(nn.Module):
         self.num_nodes = num_hr_nodes
         self.num_edges = int(num_hr_nodes * (num_hr_nodes - 1) / 2)  # 35,778
 
+        # Add layers to enrich the node embeddings before edge regression by having a 2-hop neighborhood aggregation.
+        self.node_mlp = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        
         # Edge feature predictor (acting as the message passing on the dual graph)
         # It takes the concatenated features of the two nodes forming an edge.
         self.edge_mlp = nn.Sequential(
-            nn.Linear(hidden_dim * 2, 128),
+            nn.Linear(hidden_dim * 4, 128),
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
@@ -74,14 +82,22 @@ class DEFEND(nn.Module):
             self.num_nodes, self.num_nodes, offset=1
         )
 
+        
+        # Enrich node features with a 2-hop neighborhood aggregation before edge regression
+        x_h_enriched = self.node_mlp(x_h)  # Shape: (Batch, 268, hidden_dim)
+        enriched_source_features = x_h_enriched[:, row_indices, :]
+        enriched_target_features = x_h_enriched[:, col_indices, :]
+
         # Extract the node features for the source (row) and target (col) of each edge
         source_features = x_h[:, row_indices, :]  # Shape: (Batch, 35778, hidden_dim)
         target_features = x_h[:, col_indices, :]  # Shape: (Batch, 35778, hidden_dim)
 
+        
+        
         # Concatenate node features to form the initial "dual graph nodes" (the edges)
         edge_features = torch.cat(
-            [source_features, target_features], dim=-1
-        )  # Shape: (Batch, 35778, hidden_dim * 2)
+            [source_features, target_features, enriched_source_features, enriched_target_features], dim=-1
+        )  # Shape: (Batch, 35778, hidden_dim * 4)
 
         # Regress the exact connection weights
         predicted_edge_weights = self.edge_mlp(edge_features).squeeze(
@@ -110,7 +126,8 @@ class BrainGraphSuperResolutionModel(nn.Module):
 
         # Threshold for binarizing the adjacency matrix to delineate strict neighborhoods
         self.k_threshold = k_threshold
-
+        
+        
         # 2-Layer Dense GraphSAGE Architecture
         # Provides 2-hop neighborhood aggregation while concatenating central node features,
         # which is robust for structure-based embedding.

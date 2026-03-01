@@ -21,7 +21,7 @@ def get_args():
         "--batch_size", type=int, default=32, help="Training batch size"
     )
     parser.add_argument(
-        "--epochs", type=int, default=20, help="Number of training epochs"
+        "--epochs", type=int, default=100, help="Number of training epochs"
     )
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
@@ -40,7 +40,7 @@ def get_args():
     parser.add_argument(
         "--k_threshold",
         type=float,
-        default=0.6,
+        default=0.9,
         help="Threshold for binarizing adjacency matrix",
     )
     return parser.parse_args()
@@ -79,6 +79,16 @@ def train():
         optimizer, mode="min", factor=0.5, patience=5
     )
 
+    # Save hyperparameters for reproducibility
+    with open(os.path.join(args.save_dir, "hyperparameters.txt"), "w") as f:
+        f.write(f"Data Directory: {args.data_dir}\n")
+        f.write(f"Batch Size: {args.batch_size}\n")
+        f.write(f"Epochs: {args.epochs}\n")
+        f.write(f"Learning Rate: {args.lr}\n")
+        f.write(f"Weight Decay: {args.weight_decay}\n")
+        f.write(f"K Threshold: {args.k_threshold}\n")
+
+    
     # 4. Training Loop
     best_val_loss = float("inf")
 
