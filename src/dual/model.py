@@ -56,6 +56,10 @@ class DEFEND(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
         )
         
         # Edge feature predictor (acting as the message passing on the dual graph)
@@ -92,11 +96,12 @@ class DEFEND(nn.Module):
         source_features = x_h[:, row_indices, :]  # Shape: (Batch, 35778, hidden_dim)
         target_features = x_h[:, col_indices, :]  # Shape: (Batch, 35778, hidden_dim)
 
-        
+        node_min = torch.minimum(source_features, target_features)
+        node_max = torch.maximum(source_features, target_features)
         
         # Concatenate node features to form the initial "dual graph nodes" (the edges)
         edge_features = torch.cat(
-            [source_features, target_features, enriched_source_features, enriched_target_features], dim=-1
+            [node_min, node_max, enriched_source_features, enriched_target_features], dim=-1
         )  # Shape: (Batch, 35778, hidden_dim * 4)
 
         # Regress the exact connection weights
