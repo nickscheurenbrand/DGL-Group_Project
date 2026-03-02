@@ -39,6 +39,47 @@ class BiSR(nn.Module):
         return F.relu(x_h)
 
 
+class EdgeAttentionMLP(nn.Module):
+    def __init__(self, hidden_dim):
+        super(EdgeAttentionMLP, self).__init__()
+        self.hidden_dim = hidden_dim
+        # Attention over the pair of nodes
+        # self.attn = nn.MultiheadAttention(
+        #     embed_dim=hidden_dim, num_heads=4, batch_first=True
+        # )
+
+        # Deeper MLP architecture
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_dim * 2, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+        )
+
+    def forward(self, edge_features):
+        batch_size, num_edges, _ = edge_features.shape
+
+        # Reshape to (batch * num_edges, 2, hidden_dim) for attention
+        # The sequence length is 2 (source and target nodes)
+        # x = edge_features.reshape(batch_size * num_edges, 2, self.hidden_dim)
+
+        # Self-attention between the two node features
+        # attn_out, _ = self.attn(x, x, x)
+
+        # Reshape back to (batch, num_edges, hidden_dim * 2) for MLP
+        # attn_out = attn_out.reshape(batch_size, num_edges, self.hidden_dim * 2)
+
+        return self.mlp(edge_features)
+
+
 class DEFEND(nn.Module):
     """
     Dual Graphs for Edge Feature Learning and Detection (DEFEND).
@@ -52,13 +93,7 @@ class DEFEND(nn.Module):
 
         # Edge feature predictor (acting as the message passing on the dual graph)
         # It takes the concatenated features of the two nodes forming an edge.
-        self.edge_mlp = nn.Sequential(
-            nn.Linear(hidden_dim * 2, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1),  # Outputs a single continuous edge weight
-        )
+        self.edge_mlp = EdgeAttentionMLP(hidden_dim)
 
     def forward(self, x_h):
         """
@@ -120,7 +155,7 @@ class BrainGraphSuperResolutionModel(nn.Module):
         self.k_threshold = k_threshold
 
         self.gcn_layers = nn.ModuleList(
-            DenseSAGEConv(in_channels=in_nodes, out_channels=hidden_dim_gcn)
+            (DenseSAGEConv(in_channels=in_nodes, out_channels=hidden_dim_gcn),)
         )
         for _ in range(gcn_layers - 1):
             self.gcn_layers.append(
