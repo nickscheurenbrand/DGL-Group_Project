@@ -185,7 +185,6 @@ def main():
         in_nodes=args.in_nodes,
         out_nodes=args.out_nodes,
         hidden_dim=args.hidden_dim,
-        gcn_layers=gcn_layers,
         k_threshold=args.k_threshold,
     ).to(device)
     model.load_state_dict(state_dict)
