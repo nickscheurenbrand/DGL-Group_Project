@@ -7,37 +7,37 @@ from torch_geometric.nn import DenseSAGEConv
 class BiSR(nn.Module):
     """
     Bipartite Graph Super-Resolution (Bi-SR) Layer.
-    Translates N low-resolution nodes to M high-resolution nodes using a learnable bipartite adjacency matrix.
+    Regularised to prevent memorisation of training set routing topologies.
     """
 
-    def __init__(self, in_nodes=160, out_nodes=268, feature_dim=160, hidden_dim=64):
+    def __init__(self, in_nodes=160, out_nodes=268, feature_dim=160, hidden_dim=64, dropout_rate=0.3):
         super(BiSR, self).__init__()
 
-        # The learnable bipartite matrix B (Shape: N x M)
-        # Initializes the topological "bridges" between the 160 LR regions and 268 HR regions.
         self.B = nn.Parameter(torch.randn(in_nodes, out_nodes) * 0.01)
-
-        # The feature transformation weight matrix W
         self.W = nn.Linear(feature_dim, hidden_dim)
+        
+        # Add regularisation layers
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(p=dropout_rate)
 
     def forward(self, x_l):
-        """
-        Args:
-            x_l: Low-resolution node features (Batch, in_nodes, feature_dim).
-                 Since X_L = A_L, feature_dim is usually equal to in_nodes (160).
-        Returns:
-            x_h: High-resolution node embeddings (Batch, out_nodes, hidden_dim).
-        """
-        # 1. Transform LR node features: X_L * W
-        x_transformed = self.W(x_l)  # Shape: (Batch, 160, hidden_dim)
+        # 1. Transform LR node features
+        x_transformed = self.W(x_l) 
+        
+        # 2. Regularise the transformed features
+        x_transformed = self.layer_norm(x_transformed)
+        x_transformed = F.relu(x_transformed)
+        x_transformed = self.dropout(x_transformed)
 
-        # 2. Bipartite Message Passing: B^T * (X_L * W)
-        # We use torch.matmul to broadcast across the batch dimension.
-        # self.B.t() shape is (268, 160).
-        x_h = torch.matmul(self.B.t(), x_transformed)  # Shape: (Batch, 268, hidden_dim)
+        # 3. Constrain the Bipartite Matrix
+        # Applying softmax across dim=0 ensures the structural contribution 
+        # from the 160 LR nodes to any given HR node always sums to 1.
+        B_norm = F.softmax(self.B, dim=0)
+        
+        # 4. Bipartite Message Passing
+        x_h = torch.matmul(B_norm.t(), x_transformed)  
 
         return F.relu(x_h)
-
 
 class DEFEND(nn.Module):
     """
@@ -52,10 +52,6 @@ class DEFEND(nn.Module):
 
         # Add layers to enrich the node embeddings before edge regression by having a 4-hop neighborhood aggregation.
         self.node_mlp = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),

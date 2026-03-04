@@ -19,19 +19,6 @@ from src.dual.model import BrainGraphSuperResolutionModel
 def expected_vector_length(num_nodes: int) -> int:
     return (num_nodes * (num_nodes - 1)) // 2
 
-
-def infer_gcn_layers(state_dict: dict) -> int:
-    layer_indices = set()
-    for key in state_dict.keys():
-        if key.startswith("gcn_layers."):
-            parts = key.split(".")
-            if len(parts) > 1 and parts[1].isdigit():
-                layer_indices.add(int(parts[1]))
-    if not layer_indices:
-        return 4
-    return max(layer_indices) + 1
-
-
 def get_args():
     parser = argparse.ArgumentParser(
         description="Generate test-set predictions and save Kaggle-style submission CSV"
@@ -66,12 +53,6 @@ def get_args():
         type=float,
         default=0.6,
         help="Threshold for model adjacency binarization",
-    )
-    parser.add_argument(
-        "--gcn_layers",
-        type=int,
-        default=4,
-        help="Override number of GCN layers; inferred from checkpoint if omitted",
     )
     parser.add_argument("--in_nodes", type=int, default=160, help="LR graph size")
     parser.add_argument("--out_nodes", type=int, default=268, help="HR graph size")
@@ -178,14 +159,11 @@ def main():
     print("Loading checkpoint...")
     state_dict = torch.load(model_path, map_location=device, weights_only=True)
 
-    gcn_layers = args.gcn_layers if args.gcn_layers is not None else infer_gcn_layers(state_dict)
-    print(f"Using gcn_layers={gcn_layers}")
 
     model = BrainGraphSuperResolutionModel(
         in_nodes=args.in_nodes,
         out_nodes=args.out_nodes,
         hidden_dim=args.hidden_dim,
-        gcn_layers=gcn_layers,
         k_threshold=args.k_threshold,
     ).to(device)
     model.load_state_dict(state_dict)
