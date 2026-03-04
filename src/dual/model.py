@@ -50,7 +50,7 @@ class DEFEND(nn.Module):
         self.num_nodes = num_hr_nodes
         self.num_edges = int(num_hr_nodes * (num_hr_nodes - 1) / 2)  # 35,778
 
-        # Add layers to enrich the node embeddings before edge regression by having a 2-hop neighborhood aggregation.
+        # Add layers to enrich the node embeddings before edge regression by having a 4-hop neighborhood aggregation.
         self.node_mlp = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
