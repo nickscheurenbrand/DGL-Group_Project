@@ -3,16 +3,17 @@ from pathlib import Path
 from typing import Tuple
 from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
+from sklearn.model_selection import KFold
+from torch.utils.data import Subset
 
 from src.data.dataset import BrainGraphDataset
-
 
 def get_dataloaders(
     data_dir: str,
     lr_file: str = "lr_train.csv",
     hr_file: str = "hr_train.csv",
     batch_size: int = 32,
-    val_split: float = 0.2,
+    n_splits: int = 5,
     seed: int = 42,
     num_workers: int = 0,
     shuffle_train: bool = True
@@ -49,40 +50,37 @@ def get_dataloaders(
         hr_file=str(hr_path)
     )
 
-    # Split dataset into training and validation
-    dataset_size = len(dataset)
-    val_size = int(dataset_size * val_split)
-    train_size = dataset_size - val_size
+    kfold = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    fold_loaders = []
 
-    # Ensure reproducibility of the split
-    generator = torch.Generator().manual_seed(seed)
-    
-    train_dataset, val_dataset = random_split(
-        dataset, 
-        [train_size, val_size],
-        generator=generator
-    )
+    # Iterate through the splits to create specific subsets and loaders for each fold
+    for train_idx, val_idx in kfold.split(dataset):
+        
+        # Create PyTorch Subsets using the indices from scikit-learn
+        train_dataset = Subset(dataset, train_idx)
+        val_dataset = Subset(dataset, val_idx)
 
-    # Note: Using PyTorch Geometric DataLoader to properly batch the Tuple[Data, Data] object
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=shuffle_train,
-        num_workers=num_workers
-    )
+        # Create DataLoaders for this specific fold
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=shuffle_train,
+            num_workers=num_workers
+        )
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers
-    )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers
+        )
+        
+        fold_loaders.append((train_loader, val_loader))
 
-    return train_loader, val_loader
-
+    return fold_loaders
 
 if __name__ == "__main__":
-    train_loader, val_loader = get_dataloaders(
+    all_folds = get_dataloaders(
         data_dir="generated_data",
         lr_file="lr_train.csv",
         hr_file="hr_train.csv",
@@ -92,5 +90,7 @@ if __name__ == "__main__":
         num_workers=0,
         shuffle_train=True
     )
-    print(next(iter(train_loader))[0])
-    print(next(iter(train_loader))[1])
+
+    fold_0_train, fold_0_val = all_folds[0]
+    print("Fold 1 Train Batch LR:", next(iter(fold_0_train))[0])
+    print("Fold 1 Train Batch HR:", next(iter(fold_0_train))[1])
