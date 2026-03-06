@@ -1,69 +1,99 @@
-import torch
+import pandas as pd
+import numpy as np
 from pathlib import Path
 from typing import Tuple
-from torch.utils.data import random_split
+from sklearn.model_selection import train_test_split
 from torch_geometric.loader import DataLoader
 
 from src.data.dataset import BrainGraphDataset
 
 
+def prepare_data_splits(data_dir: str, seed: int = 42) -> None:
+    """
+    Checks if train/val/test split files exist. If not, reads the original
+    train sets, splits them into 70% train, 15% validation, and 15% test,
+    and saves them to disk to ensure the test set is separated preemptively.
+    """
+    data_path = Path(data_dir)
+    files = [
+        "lr_train_split.csv",
+        "hr_train_split.csv",
+        "lr_val_split.csv",
+        "hr_val_split.csv",
+        "lr_test_split.csv",
+        "hr_test_split.csv",
+    ]
+
+    if all((data_path / f).exists() for f in files):
+        return  # Data is already split
+
+    print("Preemptively splitting data into train (70%), val (15%), test (15%)...")
+    lr_df = pd.read_csv(data_path / "lr_train.csv")
+    hr_df = pd.read_csv(data_path / "hr_train.csv")
+
+    assert len(lr_df) == len(hr_df), "Mismatch in rows between LR and HR training data."
+
+    indices = np.arange(len(lr_df))
+    # Split: 70% train, 30% temp
+    train_idx, temp_idx = train_test_split(indices, test_size=0.3, random_state=seed)
+    # Split temp: 50% val (15% overall), 50% test (15% overall)
+    val_idx, test_idx = train_test_split(temp_idx, test_size=0.5, random_state=seed)
+
+    # Save train
+    lr_df.iloc[train_idx].to_csv(data_path / "lr_train_split.csv", index=False)
+    hr_df.iloc[train_idx].to_csv(data_path / "hr_train_split.csv", index=False)
+
+    # Save val
+    lr_df.iloc[val_idx].to_csv(data_path / "lr_val_split.csv", index=False)
+    hr_df.iloc[val_idx].to_csv(data_path / "hr_val_split.csv", index=False)
+
+    # Save test
+    lr_df.iloc[test_idx].to_csv(data_path / "lr_test_split.csv", index=False)
+    hr_df.iloc[test_idx].to_csv(data_path / "hr_test_split.csv", index=False)
+
+    print("Data splitting complete.")
+
+
 def get_dataloaders(
     data_dir: str,
-    lr_file: str = "lr_train.csv",
-    hr_file: str = "hr_train.csv",
     batch_size: int = 32,
-    val_split: float = 0.2,
     seed: int = 42,
     num_workers: int = 0,
-    shuffle_train: bool = True
-) -> Tuple[DataLoader, DataLoader]:
+    shuffle_train: bool = True,
+) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
-    Loads data, instantiates the dataset, splits into train/val, and returns DataLoaders.
+    Ensures data is split preemptively, instantiates the datasets for train/val/test,
+    and returns DataLoaders.
 
     Args:
         data_dir (str): Directory where the data files are located.
-        lr_file (str, optional): Filename for the low-resolution data. Defaults to "lr_train.csv".
-        hr_file (str, optional): Filename for the high-resolution data. Defaults to "hr_train.csv".
         batch_size (int, optional): Batch size. Defaults to 32.
-        val_split (float, optional): Fraction of the data to use for validation. Defaults to 0.2.
         seed (int, optional): Random seed for the dataset split. Defaults to 42.
         num_workers (int, optional): Number of workers for data loading. Defaults to 0.
         shuffle_train (bool, optional): Whether to shuffle the training data. Defaults to True.
 
     Returns:
-        Tuple[DataLoader, DataLoader]: The training and validation loaders.
+        Tuple[DataLoader, DataLoader, DataLoader]: The train, val, and test loaders.
     """
+    prepare_data_splits(data_dir, seed=seed)
+
     data_path = Path(data_dir)
-    lr_path = data_path / lr_file
-    hr_path = data_path / hr_file
 
-    if not lr_path.exists():
-        raise FileNotFoundError(f"Low-resolution file not found at: {lr_path}")
-    if not hr_path.exists():
-        raise FileNotFoundError(f"High-resolution file not found at: {hr_path}")
-
-    # The dataset handles reading the CSVs and converting to PyTorch Geometric Data
-    # Preprocessing (un-vectorizing, tensorizing) is done in BrainGraphDataset
-    dataset = BrainGraphDataset(
-        lr_file=str(lr_path),
-        hr_file=str(hr_path)
+    train_dataset = BrainGraphDataset(
+        lr_file=str(data_path / "lr_train_split.csv"),
+        hr_file=str(data_path / "hr_train_split.csv"),
     )
 
-    # Split dataset into training and validation
-    dataset_size = len(dataset)
-    val_size = int(dataset_size * val_split)
-    train_size = dataset_size - val_size
-
-    # Ensure reproducibility of the split
-    generator = torch.Generator().manual_seed(seed)
-    
-    train_dataset, val_dataset = random_split(
-        dataset, 
-        [train_size, val_size],
-        generator=generator
+    val_dataset = BrainGraphDataset(
+        lr_file=str(data_path / "lr_val_split.csv"),
+        hr_file=str(data_path / "hr_val_split.csv"),
     )
 
-    # Note: Using PyTorch Geometric DataLoader to properly batch the Tuple[Data, Data] object
+    test_dataset = BrainGraphDataset(
+        lr_file=str(data_path / "lr_test_split.csv"),
+        hr_file=str(data_path / "hr_test_split.csv"),
+    )
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -78,19 +108,24 @@ def get_dataloaders(
         num_workers=num_workers
     )
 
-    return train_loader, val_loader
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+    )
+
+    return train_loader, val_loader, test_loader
 
 
 if __name__ == "__main__":
-    train_loader, val_loader = get_dataloaders(
+    train_loader, val_loader, test_loader = get_dataloaders(
         data_dir="generated_data",
-        lr_file="lr_train.csv",
-        hr_file="hr_train.csv",
         batch_size=32,
-        val_split=0.2,
         seed=42,
         num_workers=0,
-        shuffle_train=True
+        shuffle_train=True,
     )
+    print("Train batch:")
     print(next(iter(train_loader))[0])
-    print(next(iter(train_loader))[1])
+    print("Val batch:")
+    print(next(iter(val_loader))[0])
+    print("Test batch:")
+    print(next(iter(test_loader))[0])

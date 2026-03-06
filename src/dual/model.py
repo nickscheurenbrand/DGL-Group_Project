@@ -6,16 +6,21 @@ from torch_geometric.nn import DenseSAGEConv
 
 class BiSR(nn.Module):
     """
-    Bipartite Graph Super-Resolution (Bi-SR) Layer.
-    Translates N low-resolution nodes to M high-resolution nodes using a learnable bipartite adjacency matrix.
+    Bipartite Graph Super-Resolution (Bi-SR) Layer with low-rank factorization.
+    Translates N low-resolution nodes to M high-resolution nodes using a learnable
+    low-rank bipartite adjacency matrix B = U @ V.
     """
 
-    def __init__(self, in_nodes=160, out_nodes=268, feature_dim=160, hidden_dim=64):
+    def __init__(
+        self, in_nodes=160, out_nodes=268, feature_dim=160, hidden_dim=16, rank=8
+    ):
         super(BiSR, self).__init__()
 
-        # The learnable bipartite matrix B (Shape: N x M)
-        # Initializes the topological "bridges" between the 160 LR regions and 268 HR regions.
-        self.B = nn.Parameter(torch.randn(in_nodes, out_nodes) * 0.01)
+        # Low-rank factorization of the bipartite matrix B = U @ V
+        # Instead of a free (160, 268) matrix with 42,880 params,
+        # we use U (160, rank) + V (rank, 268) = rank * (160 + 268) params
+        self.U = nn.Parameter(torch.randn(in_nodes, rank) * 0.01)
+        self.V = nn.Parameter(torch.randn(rank, out_nodes) * 0.01)
 
         # The feature transformation weight matrix W
         self.W = nn.Linear(feature_dim, hidden_dim)
@@ -24,76 +29,65 @@ class BiSR(nn.Module):
         """
         Args:
             x_l: Low-resolution node features (Batch, in_nodes, feature_dim).
-                 Since X_L = A_L, feature_dim is usually equal to in_nodes (160).
         Returns:
             x_h: High-resolution node embeddings (Batch, out_nodes, hidden_dim).
         """
         # 1. Transform LR node features: X_L * W
         x_transformed = self.W(x_l)  # Shape: (Batch, 160, hidden_dim)
 
-        # 2. Bipartite Message Passing: B^T * (X_L * W)
-        # We use torch.matmul to broadcast across the batch dimension.
-        # self.B.t() shape is (268, 160).
-        x_h = torch.matmul(self.B.t(), x_transformed)  # Shape: (Batch, 268, hidden_dim)
+        # 2. Reconstruct bipartite matrix from low-rank factors
+        B = self.U @ self.V  # Shape: (160, 268)
+
+        # 3. Bipartite Message Passing: B^T * (X_L * W)
+        x_h = torch.matmul(B.t(), x_transformed)  # Shape: (Batch, 268, hidden_dim)
 
         return F.relu(x_h)
 
 
-class EdgeAttentionMLP(nn.Module):
-    def __init__(self, hidden_dim):
-        super(EdgeAttentionMLP, self).__init__()
-        self.hidden_dim = hidden_dim
-        # Attention over the pair of nodes
-        # self.attn = nn.MultiheadAttention(
-        #     embed_dim=hidden_dim, num_heads=4, batch_first=True
-        # )
+class EdgeMLP(nn.Module):
+    """Configurable edge weight predictor.
 
-        # Deeper MLP architecture
-        self.mlp = nn.Sequential(
-            nn.Linear(hidden_dim * 2, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Linear(64, 1),
-        )
+    num_layers=1 (default): single linear layer (most regularized).
+    num_layers>1: Linear→ReLU→Dropout stack, with the hidden size halving each
+    layer, finishing with a Linear→scalar output.
+    """
+
+    def __init__(self, hidden_dim: int, num_layers: int = 1, dropout: float = 0.5):
+        super(EdgeMLP, self).__init__()
+
+        if num_layers == 1:
+            self.net = nn.Linear(hidden_dim * 2, 1)
+        else:
+            layers = []
+            in_dim = hidden_dim * 2
+            # Build (num_layers - 1) hidden layers, halving dimension each time
+            for i in range(num_layers - 1):
+                out_dim = max(in_dim // 2, 1)
+                layers += [
+                    nn.Linear(in_dim, out_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                ]
+                in_dim = out_dim
+            layers.append(nn.Linear(in_dim, 1))
+            self.net = nn.Sequential(*layers)
 
     def forward(self, edge_features):
-        batch_size, num_edges, _ = edge_features.shape
-
-        # Reshape to (batch * num_edges, 2, hidden_dim) for attention
-        # The sequence length is 2 (source and target nodes)
-        # x = edge_features.reshape(batch_size * num_edges, 2, self.hidden_dim)
-
-        # Self-attention between the two node features
-        # attn_out, _ = self.attn(x, x, x)
-
-        # Reshape back to (batch, num_edges, hidden_dim * 2) for MLP
-        # attn_out = attn_out.reshape(batch_size, num_edges, self.hidden_dim * 2)
-
-        return self.mlp(edge_features)
+        return self.net(edge_features)
 
 
 class DEFEND(nn.Module):
     """
     Dual Graphs for Edge Feature Learning and Detection (DEFEND).
-    Takes HR node embeddings and computes the exact edge weights using dual-graph principles.
+    Takes HR node embeddings and computes the exact edge weights.
     """
 
-    def __init__(self, num_hr_nodes=268, hidden_dim=64):
+    def __init__(self, num_hr_nodes=268, hidden_dim=16, edge_mlp_layers=1, dropout=0.5):
         super(DEFEND, self).__init__()
         self.num_nodes = num_hr_nodes
         self.num_edges = int(num_hr_nodes * (num_hr_nodes - 1) / 2)  # 35,778
 
-        # Edge feature predictor (acting as the message passing on the dual graph)
-        # It takes the concatenated features of the two nodes forming an edge.
-        self.edge_mlp = EdgeAttentionMLP(hidden_dim)
+        self.edge_mlp = EdgeMLP(hidden_dim, num_layers=edge_mlp_layers, dropout=dropout)
 
     def forward(self, x_h):
         """
@@ -113,9 +107,16 @@ class DEFEND(nn.Module):
         source_features = x_h[:, row_indices, :]  # Shape: (Batch, 35778, hidden_dim)
         target_features = x_h[:, col_indices, :]  # Shape: (Batch, 35778, hidden_dim)
 
-        # Concatenate node features to form the initial "dual graph nodes" (the edges)
+        # Symmetric edge features: invariant to node ordering (undirected graph)
+        # sum and abs-diff are both commutative: f(i,j) == f(j,i)
+        edge_sum = (
+            source_features + target_features
+        )  # Shape: (Batch, 35778, hidden_dim)
+        edge_diff = torch.abs(
+            source_features - target_features
+        )  # Shape: (Batch, 35778, hidden_dim)
         edge_features = torch.cat(
-            [source_features, target_features], dim=-1
+            [edge_sum, edge_diff], dim=-1
         )  # Shape: (Batch, 35778, hidden_dim * 2)
 
         # Regress the exact connection weights
@@ -138,43 +139,72 @@ class DEFEND(nn.Module):
 class BrainGraphSuperResolutionModel(nn.Module):
     """
     The complete pipeline combining GraphGCN, Bi-SR, and DEFEND.
+    Includes mean-prior residual learning for regularization.
     """
 
     def __init__(
         self,
         in_nodes=160,
         out_nodes=268,
-        hidden_dim=64,
-        gcn_layers=2,
-        hidden_dim_gcn=128,
-        k_threshold=0.6,
+        hidden_dim=16,
+        gcn_layers=1,
+        hidden_dim_gcn=32,
+        k_threshold=0.8,
+        bisr_rank=8,
+        dropout=0.5,
+        edge_mlp_layers=1,
     ):
         super(BrainGraphSuperResolutionModel, self).__init__()
 
-        # Threshold for binarizing the adjacency matrix to delineate strict neighborhoods
+        # Threshold for binarizing the adjacency matrix
         self.k_threshold = k_threshold
+        self.dropout = dropout
 
-        self.gcn_layers = nn.ModuleList(
-            (DenseSAGEConv(in_channels=in_nodes, out_channels=hidden_dim_gcn),)
-        )
-        for _ in range(gcn_layers - 1):
-            self.gcn_layers.append(
-                DenseSAGEConv(in_channels=hidden_dim_gcn, out_channels=hidden_dim_gcn)
+        # Mean HR prior buffer (set from training data before training begins)
+        self.register_buffer("hr_mean", torch.zeros(out_nodes, out_nodes))
+
+        self.num_gcn_layers = gcn_layers
+
+        # GCN layers (reduced capacity)
+        if gcn_layers == 0:
+            # Skip GCN entirely — pass raw LR adjacency directly to BiSR
+            self.gcn_layers = nn.ModuleList()
+        elif gcn_layers == 1:
+            # Single hidden layer: in_nodes -> hidden_dim_gcn -> in_nodes
+            self.gcn_layers = nn.ModuleList(
+                [
+                    DenseSAGEConv(in_channels=in_nodes, out_channels=hidden_dim_gcn),
+                    DenseSAGEConv(in_channels=hidden_dim_gcn, out_channels=in_nodes),
+                ]
             )
-        self.gcn_layers.append(
-            DenseSAGEConv(in_channels=hidden_dim_gcn, out_channels=in_nodes)
-        )
-        if gcn_layers == 1:  # If only one layer, it should output the original features
-            self.gcn_layers = DenseSAGEConv(in_channels=in_nodes, out_channels=in_nodes)
+        else:
+            # gcn_layers hidden layers + 1 output layer
+            layers = [DenseSAGEConv(in_channels=in_nodes, out_channels=hidden_dim_gcn)]
+            for _ in range(gcn_layers - 1):
+                layers.append(
+                    DenseSAGEConv(
+                        in_channels=hidden_dim_gcn, out_channels=hidden_dim_gcn
+                    )
+                )
+            layers.append(
+                DenseSAGEConv(in_channels=hidden_dim_gcn, out_channels=in_nodes)
+            )
+            self.gcn_layers = nn.ModuleList(layers)
 
-        # Topological feature extraction
+        # Topological feature extraction with low-rank BiSR
         self.bi_sr = BiSR(
             in_nodes=in_nodes,
             out_nodes=out_nodes,
             feature_dim=in_nodes,
             hidden_dim=hidden_dim,
+            rank=bisr_rank,
         )
-        self.defend = DEFEND(num_hr_nodes=out_nodes, hidden_dim=hidden_dim)
+        self.defend = DEFEND(
+            num_hr_nodes=out_nodes,
+            hidden_dim=hidden_dim,
+            edge_mlp_layers=edge_mlp_layers,
+            dropout=dropout,
+        )
 
     def forward(self, adj_lr):
         """
@@ -184,24 +214,29 @@ class BrainGraphSuperResolutionModel(nn.Module):
             adj_hr: Batch of super-resolved high-resolution adjacency matrices (Batch, 268, 268).
         """
         # 1. Prepare GNN Inputs
-        # The node features are the original un-thresholded continuous connectivity profiles.
         node_features = adj_lr
-
-        # The topological routing graph is strictly binary based on the weight threshold k.
         binary_adj = (adj_lr > self.k_threshold).float()
 
-        # 2. GraphSAGE Forward Pass
-        for layer in self.gcn_layers:
-            node_features = F.relu(layer(node_features, binary_adj))
-
-        # We add a residual connection combining the transformed structural embedding
-        # with the original continuous row profile
-        x_lr_enriched = node_features + adj_lr
+        # 2. GraphSAGE Forward Pass (skip entirely if gcn_layers=0)
+        if self.num_gcn_layers > 0:
+            for layer in self.gcn_layers:
+                node_features = F.relu(layer(node_features, binary_adj))
+                node_features = F.dropout(
+                    node_features, p=self.dropout, training=self.training
+                )
+            # Residual connection with original input
+            x_lr_enriched = node_features + adj_lr
+        else:
+            # No GCN: pass raw adjacency directly
+            x_lr_enriched = adj_lr
 
         # 3. Map topology to target HR dimensions via Bipartite formulation
         hr_node_embeddings = self.bi_sr(x_lr_enriched)
 
-        # 2. Predict precise edge weights via Dual Graph feature learning
-        hr_adjacency_matrix = self.defend(hr_node_embeddings)
+        # 4. Predict residual edge weights via Dual Graph feature learning
+        hr_residual = self.defend(hr_node_embeddings)
+
+        # 5. Add the population mean prior
+        hr_adjacency_matrix = self.hr_mean + hr_residual
 
         return hr_adjacency_matrix

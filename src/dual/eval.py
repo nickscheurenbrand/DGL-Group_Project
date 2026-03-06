@@ -39,26 +39,44 @@ def get_args():
     parser.add_argument(
         "--k_threshold",
         type=float,
-        default=0.6,
+        default=0.8,
         help="Threshold for binarizing adjacency matrix",
     )
     parser.add_argument(
         "--gcn_layers",
         type=int,
-        default=2,
+        default=1,
         help="Number of GCN layers",
     )
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=64,
+        default=16,
         help="Hidden dimension of the model",
     )
     parser.add_argument(
         "--hidden_dim_gcn",
         type=int,
-        default=128,
+        default=32,
         help="Hidden dimension of the GCN layers",
+    )
+    parser.add_argument(
+        "--bisr_rank",
+        type=int,
+        default=8,
+        help="Rank for low-rank BiSR factorization",
+    )
+    parser.add_argument(
+        "--edge_mlp_layers",
+        type=int,
+        default=1,
+        help="Number of layers in EdgeMLP (1 = single linear; >1 adds hidden layers halving in size)",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.5,
+        help="Dropout rate",
     )
     return parser.parse_args()
 
@@ -73,8 +91,8 @@ def evaluate():
 
     # 1. Prepare Data
     print("Loading data...")
-    # We only need the validation loader for evaluation
-    _, val_loader = get_dataloaders(
+    # We only need the test loader for evaluation
+    _, _, test_loader = get_dataloaders(
         data_dir=args.data_dir, batch_size=args.batch_size, shuffle_train=False
     )
 
@@ -87,6 +105,9 @@ def evaluate():
         k_threshold=args.k_threshold,
         gcn_layers=args.gcn_layers,
         hidden_dim_gcn=args.hidden_dim_gcn,
+        bisr_rank=args.bisr_rank,
+        dropout=args.dropout,
+        edge_mlp_layers=args.edge_mlp_layers,
     ).to(device)
 
     if not os.path.exists(args.model_path):
@@ -109,7 +130,7 @@ def evaluate():
 
     print("Running evaluation...")
     with torch.no_grad():
-        for batch in tqdm(val_loader, desc="Evaluating"):
+        for batch in tqdm(test_loader, desc="Evaluating"):
             lr_data, hr_data = batch
 
             num_graphs = lr_data.num_graphs
@@ -140,8 +161,8 @@ def evaluate():
     all_preds = np.concatenate(all_preds)
     all_targets = np.concatenate(all_targets)
 
-    global_mse = total_mse / len(val_loader.dataset)
-    global_mae = total_mae / len(val_loader.dataset)
+    global_mse = total_mse / len(test_loader.dataset)
+    global_mae = total_mae / len(test_loader.dataset)
     pearson_corr, _ = pearsonr(all_preds, all_targets)
 
     print("\n" + "=" * 40)
