@@ -239,4 +239,6 @@ class BrainGraphSuperResolutionModel(nn.Module):
         # 5. Add the population mean prior
         hr_adjacency_matrix = self.hr_mean + hr_residual
 
+        hr_adjacency_matrix = torch.clamp(hr_adjacency_matrix, min=0.0, max=1.0)
+
         return hr_adjacency_matrix
