@@ -71,14 +71,14 @@ class BaselineSGC(nn.Module):
 
 def get_args():
     parser = argparse.ArgumentParser(description="Train Baseline SGC Model with 3-fold CV")
-    parser.add_argument("--data_dir", type=str, default="data/dgl-2026-brain-graph-super-resolution-challenge", help="Directory containing the training data")
+    parser.add_argument("--data_dir", type=str, default="../cw2/dgl-2026-brain-graph-super-resolution-challenge", help="Directory containing the training data")
     parser.add_argument("--batch_size", type=int, default=4, help="Training batch size")
     parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay")
-    parser.add_argument("--save_dir", type=str, default="results/sgc", help="Directory to save the checkpoints")
+    parser.add_argument("--save_dir", type=str, default="/vol/gpudata/trm25-dgl/results_sgc", help="Directory to save the checkpoints")
     parser.add_argument("--model_name", type=str, default="best_model.pth", help="Base model filename for each fold")
-    parser.add_argument("--pred_output_dir", type=str, default="results/sgc", help="Directory to save fold validation predictions")
+    parser.add_argument("--pred_output_dir", type=str, default="/vol/gpudata/trm25-dgl/results_sgc", help="Directory to save fold validation predictions")
     parser.add_argument("--patience", type=int, default=20, help="Patience for the learning rate scheduler")
     parser.add_argument("--K", type=int, default=2, help="Number of propagation steps for SGC")
     parser.add_argument("--noise_std", type=float, default=0.01, help="Standard deviation of Gaussian noise added to LR inputs during training")
@@ -132,6 +132,8 @@ def train_cv():
     fold_metrics = []
 
     for fold_num, (train_idx, val_idx) in enumerate(kf.split(all_indices), start=1):
+        if fold_num == 1:
+            continue
         print(f"\n===== Fold {fold_num}/3 =====")
 
         train_subset = Subset(full_dataset, train_idx)
