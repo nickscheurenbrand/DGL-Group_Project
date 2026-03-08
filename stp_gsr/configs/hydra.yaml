@@ -1,5 +1,0 @@
-hydra:
-  version_base: '1.3.2'
-
-  run:
-    dir: "/home/temi/ICL/deep_graph_learning/cw2/DGL-Group_Project/stp_gsr/outputs/"
