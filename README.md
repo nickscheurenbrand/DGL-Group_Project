@@ -1,5 +1,4 @@
-# DGL-Group_Project
-# DGL2026 Brain Graph Super-Resolution Challenge
+# BiRD-Brain: **Bi**partite **R**esidual **D**ual-graph network for **Brain** super-resolution 
 
 ## Contributors
 
@@ -15,7 +14,7 @@ Given an LR connectivity matrix $\mathbf{A}^{LR} \in \mathbb{R}^{160 \times 160}
 
 Enhancing brain graph resolution computationally offers significant benefits for neuroscience and clinical imaging. Obtaining high-resolution brain scans is often expensive and time-consuming. By framing this as a graph super-resolution problem, researchers can artificially upgrade legacy or lower-quality clinical data to extract fine-grained neural insights without requiring new physical scans. Furthermore, this challenge pushes the boundaries of geometric deep learning. It requires the model to learn complex topological structures and generalize to unseen brain graphs in an inductive setting.
 
-## BiRD-Brain: **Bi**partite **R**esidual **D**ual-graph network for **Brain** super-resolution - Methodology
+## Methodology
 
 #### Graph Convolutional Network
 Extracts structural features from the low resolution input graph using GraphSAGE layers and applies a residual connection to enrich the original node features.
