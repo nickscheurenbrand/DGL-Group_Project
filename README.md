@@ -1,4 +1,5 @@
-# BiRD-Brain: **Bi**partite **R**esidual **D**ual-graph network for **Brain** super-resolution 
+# BiRD-Brain
+_**Bi**partite **R**esidual **D**ual-graph network for **Brain** super-resolution_
 
 ## Contributors
 
